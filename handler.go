@@ -6,15 +6,20 @@ import (
 	"net/http"
 )
 
-// Subscriber lets you use any GraphQL implementation that
+// Subscriber lets you use any GraphQL implementation you want
 type Subscriber func(ctx context.Context, query string, operationName string, variables map[string]interface{}) (<-chan interface{}, error)
 
+// Config for the GraphQL subscriptions over WebSocket
 type Config struct {
-	CheckOrigin func(r *http.Request) bool
-	UpgradeRule func(r *http.Request) bool
-	Subscriber  Subscriber
+	// CheckOrigin can check the origin of a request, by default it allows everything
+	CheckOrigin func(*http.Request) bool
+	// UpgradeRule lets you define your own rule to limit which request you want to upgrade to subscriptions and which you do not
+	UpgradeRule func(*http.Request) bool
+	// Subscriber is a function from the GraphQL implementation you use to provide a result channer for gqlws
+	Subscriber Subscriber
 }
 
+// New returns a new handler with the given config
 func New(c Config, next http.Handler) http.Handler {
 	h := &handler{
 		conf: Config{

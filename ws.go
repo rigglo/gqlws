@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 
 	"github.com/gorilla/websocket"
@@ -47,7 +46,6 @@ func shouldUpgrade(r *http.Request) bool {
 }
 
 func (h *handler) subscription(w http.ResponseWriter, r *http.Request) {
-	log.Println("new connection")
 	upgrader := websocket.Upgrader{
 		Subprotocols: []string{graphQLWS},
 		CheckOrigin:  h.conf.CheckOrigin,
@@ -56,42 +54,30 @@ func (h *handler) subscription(w http.ResponseWriter, r *http.Request) {
 	// Upgrading connection to WebSocket
 	socket, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		w.Write([]byte(fmt.Sprintf("Error upgrading connection: %s", err)))
+		w.Write([]byte(fmt.Sprintf("Couldn't upgrade connection: %s", err)))
 		return
 	}
 	defer socket.Close()
-	defer log.Println("end connection")
 
 	closers := map[string]func(){}
 
 	for {
-		_, msgBytes, err := socket.ReadMessage()
-		if err != nil {
-			log.Println("err:", string(msgBytes))
-		}
 		m := new(message)
-		err = json.Unmarshal(msgBytes, m)
+		err := socket.ReadJSON(m)
 		if err != nil {
-			log.Println(err)
 			return
 		}
 
-		log.Println(string(msgBytes))
 		switch m.Type {
 		case connectionInitMessage:
-			err = socket.WriteJSON(message{
-				Type: connectionACKMessage,
-			})
-			if err != nil {
-				log.Println(err)
-				return
-			}
-		case stopMessage, connectionTermination:
+			send(socket, "", connectionACKMessage, nil)
+		case stopMessage:
 			err = send(socket, m.ID, completeMessage, nil)
 			if err != nil {
-				log.Println(err)
+				send(socket, m.ID, errorMessage, err)
 				return
 			}
+		case connectionTermination:
 			socket.Close()
 			return
 		case startMessage:
@@ -106,17 +92,21 @@ func (h *handler) subscription(w http.ResponseWriter, r *http.Request) {
 				send(socket, m.ID, errorMessage, err)
 				return
 			}
+
 			ctx, cancel := context.WithCancel(r.Context())
 			out, err := h.conf.Subscriber(ctx, p.Query, p.OperationName, p.Variables)
 			if err != nil {
-				log.Printf("error from exec.Subscribe(): %s", err)
-				send(socket, m.ID, connectionErrorMessage, nil)
+				send(socket, m.ID, errorMessage, err)
 			}
 			closers[m.ID] = cancel
 
 			go func() {
+				defer socket.Close()
 				for v := range out {
-					send(socket, m.ID, dataMessage, v)
+					err := send(socket, m.ID, dataMessage, v)
+					if err != nil {
+						break
+					}
 				}
 				send(socket, m.ID, completeMessage, nil)
 				closers[m.ID]()
@@ -127,7 +117,6 @@ func (h *handler) subscription(w http.ResponseWriter, r *http.Request) {
 }
 
 func send(socket *websocket.Conn, id string, mt string, payload interface{}) error {
-	log.Printf("sent: %s, %s, %+v", id, mt, payload)
 	return socket.WriteJSON(message{
 		ID:      id,
 		Type:    mt,
