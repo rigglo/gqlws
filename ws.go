@@ -106,10 +106,6 @@ func (h *handler) subscription(w http.ResponseWriter, r *http.Request) {
 				send(socket, m.ID, errorMessage, err)
 				return
 			}
-			if err != nil {
-				send(socket, m.ID, errorMessage, nil)
-				return
-			}
 			ctx, cancel := context.WithCancel(r.Context())
 			out, err := h.conf.Subscriber(ctx, p.Query, p.OperationName, p.Variables)
 			if err != nil {

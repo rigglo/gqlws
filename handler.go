@@ -2,6 +2,7 @@ package gqlws
 
 import (
 	"context"
+	"errors"
 	"net/http"
 )
 
@@ -19,6 +20,9 @@ func New(c Config, next http.Handler) http.Handler {
 		conf: Config{
 			CheckOrigin: func(r *http.Request) bool { return true },
 			UpgradeRule: func(r *http.Request) bool { return true },
+			Subscriber: func(ctx context.Context, query string, operationName string, variables map[string]interface{}) (<-chan interface{}, error) {
+				return nil, errors.New("no subscriber function provided")
+			},
 		},
 		next: next,
 	}
@@ -27,6 +31,9 @@ func New(c Config, next http.Handler) http.Handler {
 	}
 	if c.UpgradeRule != nil {
 		h.conf.UpgradeRule = c.UpgradeRule
+	}
+	if c.Subscriber != nil {
+		h.conf.Subscriber = c.Subscriber
 	}
 	return h
 }
