@@ -72,6 +72,7 @@ func (h *handler) subscription(w http.ResponseWriter, r *http.Request) {
 		case connectionInitMessage:
 			send(socket, "", connectionACKMessage, nil)
 		case stopMessage:
+			closers[m.ID]()
 			err = send(socket, m.ID, completeMessage, nil)
 			if err != nil {
 				send(socket, m.ID, errorMessage, err)
