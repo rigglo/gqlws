@@ -17,6 +17,9 @@ type Config struct {
 	UpgradeRule func(*http.Request) bool
 	// Subscriber is a function from the GraphQL implementation you use to provide a result channer for gqlws
 	Subscriber Subscriber
+	// OnConnect is called at the initialization of a new connection with the request context and the init message's payload that potentially contains the "authToken"
+	// and other fields specified in the client
+	OnConnect func(context.Context, map[string]interface{}) (context.Context, error)
 }
 
 // New returns a new handler with the given config
@@ -27,6 +30,9 @@ func New(c Config, next http.Handler) http.Handler {
 			UpgradeRule: func(r *http.Request) bool { return true },
 			Subscriber: func(ctx context.Context, query string, operationName string, variables map[string]interface{}) (<-chan interface{}, error) {
 				return nil, errors.New("no subscriber function provided")
+			},
+			OnConnect: func(ctx context.Context, _ map[string]interface{}) (context.Context, error) {
+				return ctx, nil
 			},
 		},
 		next: next,
@@ -39,6 +45,9 @@ func New(c Config, next http.Handler) http.Handler {
 	}
 	if c.Subscriber != nil {
 		h.conf.Subscriber = c.Subscriber
+	}
+	if c.OnConnect != nil {
+		h.conf.OnConnect = c.OnConnect
 	}
 	return h
 }

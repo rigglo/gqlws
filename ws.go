@@ -31,9 +31,13 @@ type opPayload struct {
 }
 
 type message struct {
-	ID      string      `json:"id"`
-	Type    string      `json:"type"`
-	Payload interface{} `json:"payload"`
+	ID      string          `json:"id"`
+	Type    string          `json:"type"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+type errorPayload struct {
+	Message string `json:"message"`
 }
 
 func shouldUpgrade(r *http.Request) bool {
@@ -60,6 +64,7 @@ func (h *handler) subscription(w http.ResponseWriter, r *http.Request) {
 	defer socket.Close()
 
 	closers := map[string]func(){}
+	ctx := r.Context()
 
 	for {
 		m := new(message)
@@ -70,12 +75,22 @@ func (h *handler) subscription(w http.ResponseWriter, r *http.Request) {
 
 		switch m.Type {
 		case connectionInitMessage:
+			p := map[string]interface{}{}
+			err = json.Unmarshal(m.Payload, &p)
+			if err != nil {
+				send(socket, m.ID, errorMessage, errorPayload{err.Error()})
+				return
+			}
+			if ctx, err = h.conf.OnConnect(ctx, p); err != nil {
+				send(socket, m.ID, errorMessage, errorPayload{err.Error()})
+				return
+			}
 			send(socket, "", connectionACKMessage, nil)
 		case stopMessage:
 			closers[m.ID]()
 			err = send(socket, m.ID, completeMessage, nil)
 			if err != nil {
-				send(socket, m.ID, errorMessage, err)
+				send(socket, m.ID, errorMessage, errorPayload{err.Error()})
 				return
 			}
 		case connectionTermination:
@@ -83,21 +98,16 @@ func (h *handler) subscription(w http.ResponseWriter, r *http.Request) {
 			return
 		case startMessage:
 			p := new(opPayload)
-			pl, err := json.Marshal(m.Payload)
+			err = json.Unmarshal(m.Payload, &p)
 			if err != nil {
-				send(socket, m.ID, errorMessage, err)
-				return
-			}
-			err = json.Unmarshal(pl, &p)
-			if err != nil {
-				send(socket, m.ID, errorMessage, err)
+				send(socket, m.ID, errorMessage, errorPayload{err.Error()})
 				return
 			}
 
-			ctx, cancel := context.WithCancel(r.Context())
+			ctx, cancel := context.WithCancel(ctx)
 			out, err := h.conf.Subscriber(ctx, p.Query, p.OperationName, p.Variables)
 			if err != nil {
-				send(socket, m.ID, errorMessage, err)
+				send(socket, m.ID, errorMessage, errorPayload{err.Error()})
 			}
 			closers[m.ID] = cancel
 
@@ -110,15 +120,21 @@ func (h *handler) subscription(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				send(socket, m.ID, completeMessage, nil)
-				closers[m.ID]()
+				cancel()
 				delete(closers, m.ID)
 			}()
 		}
 	}
 }
 
+type sentMessage struct {
+	ID      string      `json:"id"`
+	Type    string      `json:"type"`
+	Payload interface{} `json:"payload"`
+}
+
 func send(socket *websocket.Conn, id string, mt string, payload interface{}) error {
-	return socket.WriteJSON(message{
+	return socket.WriteJSON(sentMessage{
 		ID:      id,
 		Type:    mt,
 		Payload: payload,
